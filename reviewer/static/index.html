@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Multi-agent Code Reviewer</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #06b6d4;
+      --accent-hover: #0891b2;
+      --critical: #ef4444;
+      --good: #10b981;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 15px;
+      line-height: 1.55;
+    }
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+    h1 {
+      margin: 0 0 4px;
+      font-size: 24px;
+      letter-spacing: -0.02em;
+    }
+    h1 .accent { color: var(--accent); }
+    p.subtitle {
+      margin: 0 0 28px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    textarea, input[type=text] {
+      width: 100%;
+      background: #0b1220;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      resize: vertical;
+    }
+    textarea:focus, input[type=text]:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    textarea { min-height: 280px; }
+    .row {
+      display: flex;
+      gap: 12px;
+      align-items: end;
+      margin-top: 14px;
+    }
+    .row .field { flex: 1; }
+    button {
+      background: var(--accent);
+      color: #042326;
+      border: none;
+      padding: 12px 22px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 120ms;
+      white-space: nowrap;
+    }
+    button:hover { background: var(--accent-hover); }
+    button:disabled {
+      background: #475569;
+      color: var(--muted);
+      cursor: not-allowed;
+    }
+    .examples {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .examples .pill {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 400;
+    }
+    .examples .pill:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    #status {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      min-height: 20px;
+    }
+    #status.error { color: var(--critical); }
+    #status.success { color: var(--good); }
+    .spinner {
+      display: inline-block;
+      width: 12px; height: 12px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 8px;
+      vertical-align: -2px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #report {
+      margin-top: 24px;
+    }
+    #report.hidden { display: none; }
+    .report-content {
+      background: #0b1220;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px 28px;
+      line-height: 1.65;
+    }
+    .report-content h1 { font-size: 22px; margin: 0 0 12px; }
+    .report-content h2 {
+      font-size: 17px;
+      margin: 24px 0 10px;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 6px;
+    }
+    .report-content h3 { font-size: 15px; margin: 18px 0 8px; }
+    .report-content h4 { font-size: 14px; margin: 14px 0 6px; }
+    .report-content code {
+      background: #1e293b;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 0.92em;
+    }
+    .report-content pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    .report-content pre code {
+      background: transparent;
+      padding: 0;
+      font-size: 0.9em;
+    }
+    .report-content hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+    .report-content ul { padding-left: 22px; }
+    .report-content blockquote {
+      border-left: 3px solid var(--accent);
+      margin: 12px 0;
+      padding: 4px 14px;
+      color: var(--muted);
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .stat {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .stat .name {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .stat .value { font-size: 18px; font-weight: 600; margin-top: 4px; }
+    .stat .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    footer {
+      margin-top: 40px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1><span class="accent">▸</span> Multi-agent Code Reviewer</h1>
+    <p class="subtitle">
+      Vlož kód → tři specialisté (security, performance, style) běží paralelně →
+      supervisor je sloučí do jednoho reportu.
+    </p>
+
+    <div class="panel">
+      <label for="code">Kód k review</label>
+      <textarea id="code" placeholder="def login(u, p):&#10;    q = &quot;SELECT * FROM users WHERE u=&apos;&quot; + u + &quot;&apos;&quot;&#10;    return q"></textarea>
+
+      <div class="examples">
+        <span style="color:var(--muted); font-size:12px; padding:4px 0;">Ukázka:</span>
+        <button type="button" class="pill" data-example="vulnerable">SQL injection</button>
+        <button type="button" class="pill" data-example="n_plus_one">N+1 dotaz</button>
+        <button type="button" class="pill" data-example="clean">Čistý kód</button>
+        <button type="button" class="pill" data-example="clear">Vymazat</button>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="label">Popisek souboru (volitelné)</label>
+          <input type="text" id="label" placeholder="<web>" />
+        </div>
+        <button id="run">Spustit review</button>
+      </div>
+      <div id="status"></div>
+    </div>
+
+    <div id="report" class="hidden">
+      <div class="report-content" id="reportBody"></div>
+      <div class="stats" id="stats"></div>
+    </div>
+
+    <footer>
+      Postavené na <a href="https://docs.claude.com/en/docs/claude-code/sdk" target="_blank">Claude Agent SDK</a> +
+      <a href="https://fastapi.tiangolo.com/" target="_blank">FastAPI</a>.
+      Repo: <a href="https://github.com/dotexocz/code-reviewer-agent" target="_blank">dotexocz/code-reviewer-agent</a>
+    </footer>
+  </div>
+
+  <script>
+    const codeEl = document.getElementById('code');
+    const labelEl = document.getElementById('label');
+    const runEl = document.getElementById('run');
+    const statusEl = document.getElementById('status');
+    const reportEl = document.getElementById('report');
+    const reportBodyEl = document.getElementById('reportBody');
+    const statsEl = document.getElementById('stats');
+
+    const EXAMPLES = {
+      vulnerable: 'def login(u, p):\n    q = "SELECT * FROM users WHERE u=\'" + u + "\'"\n    cur.execute(q)\n    return cur.fetchone()',
+      n_plus_one: 'def get_orders(user_ids):\n    result = []\n    for uid in user_ids:\n        cur.execute("SELECT * FROM orders WHERE user_id = ?", (uid,))\n        result.extend(cur.fetchall())\n    return result',
+      clean: 'def add(a: int, b: int) -> int:\n    """Secte dve cela cisla."""\n    return a + b',
+      clear: '',
+    };
+
+    document.querySelectorAll('.examples .pill').forEach(btn => {
+      btn.addEventListener('click', () => {
+        codeEl.value = EXAMPLES[btn.dataset.example] || '';
+        codeEl.focus();
+      });
+    });
+
+    /** Bezpecne nahradi obsah elementu naparsovanym HTML (bez innerHTML). */
+    function setHtml(target, htmlString) {
+      const doc = new DOMParser().parseFromString(htmlString, 'text/html');
+      const fragment = document.createDocumentFragment();
+      Array.from(doc.body.childNodes).forEach(node => {
+        fragment.appendChild(document.importNode(node, true));
+      });
+      target.replaceChildren(fragment);
+    }
+
+    function makeStat(name, value, meta) {
+      const div = document.createElement('div');
+      div.className = 'stat';
+
+      const n = document.createElement('div');
+      n.className = 'name';
+      n.textContent = name;
+
+      const v = document.createElement('div');
+      v.className = 'value';
+      v.textContent = value;
+
+      const m = document.createElement('div');
+      m.className = 'meta';
+      m.textContent = meta;
+
+      div.append(n, v, m);
+      return div;
+    }
+
+    function renderStats(data) {
+      const items = [];
+      data.specialists.forEach(s => {
+        items.push(makeStat(s.label, s.duration_s + ' s', '$' + s.cost_usd));
+      });
+      items.push(makeStat('Supervisor', data.supervisor.duration_s + ' s', '$' + data.supervisor.cost_usd));
+      items.push(makeStat('Celkem (kriticka cesta)', data.totals.duration_s + ' s', '$' + data.totals.cost_usd));
+      statsEl.replaceChildren(...items);
+    }
+
+    function setStatus(text, kind) {
+      statusEl.replaceChildren();
+      if (kind === 'loading') {
+        const spinner = document.createElement('span');
+        spinner.className = 'spinner';
+        statusEl.append(spinner, document.createTextNode(text));
+      } else {
+        statusEl.textContent = text;
+      }
+      statusEl.className = (kind === 'error' || kind === 'success') ? kind : '';
+    }
+
+    runEl.addEventListener('click', async () => {
+      const code = codeEl.value.trim();
+      if (!code) {
+        setStatus('Vloz nejdriv nejaky kod.', 'error');
+        return;
+      }
+
+      runEl.disabled = true;
+      reportEl.classList.add('hidden');
+      setStatus('3 specialiste bezi paralelne + supervisor (~10-15 s)...', 'loading');
+
+      const started = performance.now();
+
+      try {
+        const res = await fetch('/api/review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, file_label: labelEl.value || '<web>' }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || ('Server vratil ' + res.status));
+        }
+        const data = await res.json();
+
+        const elapsed = ((performance.now() - started) / 1000).toFixed(1);
+        setStatus('Hotovo za ' + elapsed + ' s.', 'success');
+
+        setHtml(reportBodyEl, data.final_report_html);
+        renderStats(data);
+        reportEl.classList.remove('hidden');
+        reportEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch (e) {
+        setStatus('Chyba: ' + e.message, 'error');
+      } finally {
+        runEl.disabled = false;
+      }
+    });
+
+    // Cmd/Ctrl+Enter pro odeslani
+    codeEl.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') runEl.click();
+    });
+  </script>
+</body>
+</html>

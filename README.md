@@ -105,7 +105,21 @@ SDK potřebuje přístup ke Claude. Dvě cesty:
 
 ## Použití
 
-### Review konkrétního souboru
+### Web UI (pro klikací demo)
+
+```bash
+python3 -m reviewer.web
+# → otevři http://127.0.0.1:8000/
+```
+
+V prohlížeči vlož kód do textarea, klikni **Spustit review** a uvidíš
+strukturovaný report s tabulkou statistik. Cmd/Ctrl+Enter slouží jako
+zkratka pro odeslání.
+
+Tlačítka „SQL injection", „N+1 dotaz" a „Čistý kód" rovnou nahodí ukázkové
+příklady.
+
+### Review konkrétního souboru (CLI)
 
 ```bash
 python3 -m reviewer examples/vulnerable_login.py
@@ -201,7 +215,10 @@ code-reviewer-agent/
 │   ├── __init__.py                  ← package metadata + diagram
 │   ├── __main__.py                  ← CLI (python -m reviewer)
 │   ├── orchestrator.py              ← Supervisor + Parallel logika
-│   └── prompts.py                   ← system prompty pro 4 agenty
+│   ├── prompts.py                   ← system prompty pro 4 agenty
+│   ├── web.py                       ← FastAPI web UI (python -m reviewer.web)
+│   └── static/
+│       └── index.html               ← dark UI s textarea a vykreslením reportu
 ├── examples/
 │   └── vulnerable_login.py          ← úmyslně chybový kód pro demo
 └── docs/

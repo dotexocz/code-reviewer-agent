@@ -1,2 +1,5 @@
 claude-agent-sdk>=0.1.0
 rich>=13.7.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+markdown>=3.6
