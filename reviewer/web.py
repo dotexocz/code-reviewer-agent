@@ -38,6 +38,9 @@ app = FastAPI(
 class ReviewRequest(BaseModel):
     code: str = Field(..., description="Kód k review (libovolný jazyk)")
     file_label: str = Field("<web>", description="Popisek souboru pro report")
+    max_iterations: int = Field(2, ge=1, le=3, description="Loop cap (1-3)")
+    score_threshold: float = Field(5.0, ge=0.0, le=10.0, description="Pod tímto skóre se spouští refinement")
+    skip_preflight: bool = Field(False, description="Vynech Conditional preflight")
 
 
 @app.get("/healthz")
@@ -51,7 +54,13 @@ async def api_review(req: ReviewRequest) -> JSONResponse:
         raise HTTPException(status_code=400, detail="Kód k review je prázdný.")
 
     try:
-        result = await review_code(req.code, file_label=req.file_label)
+        result = await review_code(
+            req.code,
+            file_label=req.file_label,
+            max_iterations=req.max_iterations,
+            score_threshold=req.score_threshold,
+            skip_preflight=req.skip_preflight,
+        )
     except Exception as exc:
         log.exception("Review failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -65,22 +74,44 @@ async def api_review(req: ReviewRequest) -> JSONResponse:
         {
             "final_report_markdown": result.final_report,
             "final_report_html": final_html,
-            "specialists": [
+            "final_score": result.final_score,
+            "preflight": (
                 {
-                    "name": r.name,
-                    "label": r.label,
-                    "duration_s": round(r.duration_s, 2),
-                    "cost_usd": round(r.cost_usd, 4),
+                    "language": result.preflight.language,
+                    "file_type": result.preflight.file_type,
+                    "rationale": result.preflight.rationale,
+                    "specialists": result.preflight.specialists,
+                    "duration_s": round(result.preflight.duration_s, 2),
+                    "cost_usd": round(result.preflight.cost_usd, 4),
                 }
-                for r in result.specialist_reports
+                if result.preflight
+                else None
+            ),
+            "iterations": [
+                {
+                    "iteration": it.iteration,
+                    "is_refinement": it.is_refinement,
+                    "score": it.score,
+                    "specialists": [
+                        {
+                            "name": r.name,
+                            "label": r.label,
+                            "duration_s": round(r.duration_s, 2),
+                            "cost_usd": round(r.cost_usd, 4),
+                        }
+                        for r in it.specialist_reports
+                    ],
+                    "supervisor": {
+                        "duration_s": round(it.supervisor_duration_s, 2),
+                        "cost_usd": round(it.supervisor_cost_usd, 4),
+                    },
+                }
+                for it in result.iterations
             ],
-            "supervisor": {
-                "duration_s": round(result.supervisor_duration_s, 2),
-                "cost_usd": round(result.supervisor_cost_usd, 4),
-            },
             "totals": {
                 "duration_s": round(result.total_duration_s, 2),
                 "cost_usd": round(result.total_cost_usd, 4),
+                "iteration_count": len(result.iterations),
             },
         }
     )

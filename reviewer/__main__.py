@@ -26,7 +26,12 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
-from .orchestrator import FinalReview, review_code
+from .orchestrator import (
+    DEFAULT_MAX_ITERATIONS,
+    DEFAULT_SCORE_THRESHOLD,
+    FinalReview,
+    review_code,
+)
 
 
 def _read_input(args: argparse.Namespace) -> tuple[str, str]:
@@ -64,31 +69,65 @@ def _render_progress(console: Console, file_label: str) -> None:
     console.print(
         Panel.fit(
             f"[bold]Cíl review:[/bold] [cyan]{file_label}[/cyan]\n"
-            "[dim]3 specialisté běží paralelně → supervisor je sloučí.[/dim]",
+            "[dim]Preflight (Conditional) → specialisté (Parallel) → "
+            "supervisor → loop pokud skóre nízké.[/dim]",
             title="Multi-agent code reviewer",
             border_style="cyan",
         )
     )
 
 
+def _render_preflight(console: Console, review: FinalReview) -> None:
+    """Vypíše rozhodnutí Conditional preflighteru, pokud běžel."""
+    if review.preflight is None:
+        return
+    p = review.preflight
+    specialists_str = ", ".join(p.specialists) if p.specialists else "(žádný)"
+    console.print(
+        Panel.fit(
+            f"[bold]Jazyk:[/bold] {p.language}    "
+            f"[bold]Typ:[/bold] {p.file_type}\n"
+            f"[bold]Aktivováno:[/bold] [cyan]{specialists_str}[/cyan]\n"
+            f"[dim]{p.rationale}[/dim]",
+            title="Preflight (Conditional)",
+            border_style="magenta",
+        )
+    )
+
+
 def _render_stats(console: Console, review: FinalReview) -> None:
-    """Vypíše tabulku se statistikami všech čtyř agentů."""
+    """Vypíše tabulku se statistikami všech agentů napříč iteracemi."""
     table = Table(title="Statistika běhu", show_header=True, header_style="bold")
-    table.add_column("Agent", style="cyan")
+    table.add_column("Fáze", style="cyan")
     table.add_column("Délka", justify="right")
     table.add_column("Cena USD", justify="right")
 
-    for r in review.specialist_reports:
-        table.add_row(r.label, f"{r.duration_s:.1f} s", f"${r.cost_usd:.4f}")
+    if review.preflight:
+        table.add_row(
+            "Preflight",
+            f"{review.preflight.duration_s:.1f} s",
+            f"${review.preflight.cost_usd:.4f}",
+        )
 
-    table.add_row(
-        "Supervisor",
-        f"{review.supervisor_duration_s:.1f} s",
-        f"${review.supervisor_cost_usd:.4f}",
-    )
+    for it in review.iterations:
+        marker = f"Iterace #{it.iteration}"
+        if it.is_refinement:
+            marker += " (refinement)"
+        if it.score is not None:
+            marker += f" — skóre {it.score:.1f}/10"
+        table.add_section()
+        table.add_row(f"[bold]{marker}[/bold]", "", "")
+        for r in it.specialist_reports:
+            table.add_row(f"  {r.label}", f"{r.duration_s:.1f} s", f"${r.cost_usd:.4f}")
+        table.add_row(
+            "  Supervisor",
+            f"{it.supervisor_duration_s:.1f} s",
+            f"${it.supervisor_cost_usd:.4f}",
+        )
+
     table.add_section()
     table.add_row(
-        "[bold]Celkem (kritická cesta)[/bold]",
+        "[bold]Celkem (sečtené iterace)[/bold]",
         f"[bold]{review.total_duration_s:.1f} s[/bold]",
         f"[bold]${review.total_cost_usd:.4f}[/bold]",
     )
@@ -99,23 +138,46 @@ def _to_json(review: FinalReview, file_label: str) -> str:
     payload = {
         "file": file_label,
         "final_report_markdown": review.final_report,
-        "specialists": [
+        "final_score": review.final_score,
+        "preflight": (
             {
-                "name": r.name,
-                "label": r.label,
-                "duration_s": round(r.duration_s, 3),
-                "cost_usd": round(r.cost_usd, 6),
-                "report": r.content,
+                "language": review.preflight.language,
+                "file_type": review.preflight.file_type,
+                "rationale": review.preflight.rationale,
+                "specialists": review.preflight.specialists,
+                "duration_s": round(review.preflight.duration_s, 3),
+                "cost_usd": round(review.preflight.cost_usd, 6),
             }
-            for r in review.specialist_reports
+            if review.preflight
+            else None
+        ),
+        "iterations": [
+            {
+                "iteration": it.iteration,
+                "is_refinement": it.is_refinement,
+                "score": it.score,
+                "supervisor": {
+                    "duration_s": round(it.supervisor_duration_s, 3),
+                    "cost_usd": round(it.supervisor_cost_usd, 6),
+                    "report": it.supervisor_report,
+                },
+                "specialists": [
+                    {
+                        "name": r.name,
+                        "label": r.label,
+                        "duration_s": round(r.duration_s, 3),
+                        "cost_usd": round(r.cost_usd, 6),
+                        "report": r.content,
+                    }
+                    for r in it.specialist_reports
+                ],
+            }
+            for it in review.iterations
         ],
-        "supervisor": {
-            "duration_s": round(review.supervisor_duration_s, 3),
-            "cost_usd": round(review.supervisor_cost_usd, 6),
-        },
         "totals": {
             "duration_s": round(review.total_duration_s, 3),
             "cost_usd": round(review.total_cost_usd, 6),
+            "iteration_count": len(review.iterations),
         },
     }
     return json.dumps(payload, indent=2, ensure_ascii=False)
@@ -149,6 +211,29 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Strojově čitelný výstup (JSON) místo pretty markdownu.",
     )
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=DEFAULT_MAX_ITERATIONS,
+        metavar="N",
+        help=f"Loop pattern: maximální počet iterací (default {DEFAULT_MAX_ITERATIONS}). "
+        "1 = žádný loop, jen jedno kolo.",
+    )
+    parser.add_argument(
+        "--score-threshold",
+        type=float,
+        default=DEFAULT_SCORE_THRESHOLD,
+        metavar="X",
+        help=f"Loop pattern: pod tímto skóre 1-10 se spouští refinement "
+        f"(default {DEFAULT_SCORE_THRESHOLD}).",
+    )
+    parser.add_argument(
+        "--no-preflight",
+        action="store_true",
+        help="Conditional pattern: vynech preflight a spusť všechny tři "
+        "specialisty (rychlejší o 1 LLM call, ale dražší o 1-2 specialisty "
+        "u nestandardních souborů).",
+    )
     return parser
 
 
@@ -166,11 +251,19 @@ async def _run(args: argparse.Namespace) -> int:
     _render_progress(console, file_label)
 
     with console.status("[cyan]Probíhá review…[/cyan]", spinner="dots"):
-        review = await review_code(code, file_label=file_label)
+        review = await review_code(
+            code,
+            file_label=file_label,
+            max_iterations=args.max_iterations,
+            score_threshold=args.score_threshold,
+            skip_preflight=args.no_preflight,
+        )
 
     if args.json:
         print(_to_json(review, file_label))
     else:
+        console.print()
+        _render_preflight(console, review)
         console.print()
         console.print(Markdown(review.final_report))
         console.print()

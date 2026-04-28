@@ -1,11 +1,23 @@
-"""Ukazkovy soubor s umyslnymi chybami pro demonstraci reviewera.
+"""!!! VAROVANI: UKAZKOVY SOUBOR S UMYSLNE CHYBOVYM KODEM !!!
 
-Tento kod obsahuje SCHVALNE:
-- Bezpecnostni dury: hardcoded heslo, SQL injection, slaby hash, command injection
+Tento soubor existuje VYHRADNE jako fixture pro demonstraci multi-agent
+code reviewera. Vsechny zranitelnosti uvnitr jsou ZAMERNE:
+
+- Bezpecnostni dury: hardcoded heslo, SQL injection, slaby hash MD5,
+  command injection pres shell=True
 - Vykonnostni problemy: N+1 dotaz, opakovany I/O ve smycce
-- Stylove prohresky: kratke nazvy, magic numbers, prilis dlouha funkce
+- Stylove prohresky: kratke nazvy, magic numbers, dlouha funkce, hluboke
+  vnoreni
 
-NIKDY tento kod nepouzivej v produkci - je to fixture pro demo.
+PRAVIDLA POUZITI:
+1. NIKDY tento kod nespoustej.
+2. NIKDY ho neimportuj do realne aplikace.
+3. NIKDY z nej neopisuj vzory do produkce.
+4. Soubor neni importovany z reviewer/ baliku - pouziva se POUZE jako vstup
+   pro `python -m reviewer examples/vulnerable_login.py`.
+
+Pokud jsi natrefil/-a na tento soubor v jinem kontextu nez jako vstupni
+fixture pro reviewera, nahlas to.
 """
 import hashlib
 import sqlite3

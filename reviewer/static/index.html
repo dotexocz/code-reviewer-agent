@@ -244,6 +244,11 @@
     </div>
 
     <div id="report" class="hidden">
+      <div id="preflight" class="hidden" style="background: #1e293b; border: 1px solid #6366f1; border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;">
+        <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #a5b4fc; margin-bottom: 6px;">Preflight (Conditional)</div>
+        <div id="preflightBody" style="font-size: 14px;"></div>
+      </div>
+      <div id="iterations" style="margin-bottom: 16px;"></div>
       <div class="report-content" id="reportBody"></div>
       <div class="stats" id="stats"></div>
     </div>
@@ -310,12 +315,87 @@
 
     function renderStats(data) {
       const items = [];
-      data.specialists.forEach(s => {
-        items.push(makeStat(s.label, s.duration_s + ' s', '$' + s.cost_usd));
+      if (data.preflight) {
+        items.push(makeStat('Preflight', data.preflight.duration_s + ' s', '$' + data.preflight.cost_usd));
+      }
+      // Sečteno přes všechny iterace pro přehlednost
+      const lastIter = data.iterations[data.iterations.length - 1];
+      lastIter.specialists.forEach(s => {
+        items.push(makeStat(s.label + ' (poslední iter.)', s.duration_s + ' s', '$' + s.cost_usd));
       });
-      items.push(makeStat('Supervisor', data.supervisor.duration_s + ' s', '$' + data.supervisor.cost_usd));
-      items.push(makeStat('Celkem (kriticka cesta)', data.totals.duration_s + ' s', '$' + data.totals.cost_usd));
+      items.push(makeStat('Supervisor (poslední iter.)', lastIter.supervisor.duration_s + ' s', '$' + lastIter.supervisor.cost_usd));
+      items.push(makeStat(
+        'Celkem (' + data.totals.iteration_count + 'x iterace)',
+        data.totals.duration_s + ' s',
+        '$' + data.totals.cost_usd
+      ));
       statsEl.replaceChildren(...items);
+    }
+
+    function renderPreflight(data) {
+      const preflightEl = document.getElementById('preflight');
+      const bodyEl = document.getElementById('preflightBody');
+      if (!data.preflight) {
+        preflightEl.classList.add('hidden');
+        return;
+      }
+      const p = data.preflight;
+      bodyEl.replaceChildren();
+
+      const line1 = document.createElement('div');
+      const lang = document.createElement('strong');
+      lang.textContent = 'Jazyk: ';
+      const langVal = document.createElement('span');
+      langVal.textContent = p.language + '   ';
+      const ft = document.createElement('strong');
+      ft.textContent = 'Typ: ';
+      const ftVal = document.createElement('span');
+      ftVal.textContent = p.file_type;
+      line1.append(lang, langVal, ft, ftVal);
+
+      const line2 = document.createElement('div');
+      line2.style.marginTop = '4px';
+      const act = document.createElement('strong');
+      act.textContent = 'Aktivováno: ';
+      const actVal = document.createElement('span');
+      actVal.style.color = '#06b6d4';
+      actVal.textContent = p.specialists.length ? p.specialists.join(', ') : '(žádný)';
+      line2.append(act, actVal);
+
+      const line3 = document.createElement('div');
+      line3.style.marginTop = '4px';
+      line3.style.color = '#94a3b8';
+      line3.style.fontStyle = 'italic';
+      line3.textContent = p.rationale;
+
+      bodyEl.append(line1, line2, line3);
+      preflightEl.classList.remove('hidden');
+    }
+
+    function renderIterations(data) {
+      const el = document.getElementById('iterations');
+      el.replaceChildren();
+      if (data.iterations.length <= 1) return;  // jeden průchod = nic neukazujeme
+
+      const banner = document.createElement('div');
+      banner.style.cssText = 'background:#1e293b; border:1px solid #f59e0b; border-radius:12px; padding:14px 18px;';
+
+      const title = document.createElement('div');
+      title.style.cssText = 'font-size:12px; text-transform:uppercase; letter-spacing:0.06em; color:#fcd34d; margin-bottom:6px;';
+      title.textContent = 'Loop pattern: ' + data.iterations.length + ' iterace';
+      banner.appendChild(title);
+
+      data.iterations.forEach(it => {
+        const line = document.createElement('div');
+        line.style.fontSize = '14px';
+        let txt = 'Iterace #' + it.iteration;
+        if (it.is_refinement) txt += ' (refinement)';
+        if (it.score !== null && it.score !== undefined) txt += ' — skóre ' + it.score.toFixed(1) + '/10';
+        line.textContent = txt;
+        banner.appendChild(line);
+      });
+
+      el.appendChild(banner);
     }
 
     function setStatus(text, kind) {
@@ -358,6 +438,8 @@
         const elapsed = ((performance.now() - started) / 1000).toFixed(1);
         setStatus('Hotovo za ' + elapsed + ' s.', 'success');
 
+        renderPreflight(data);
+        renderIterations(data);
         setHtml(reportBodyEl, data.final_report_html);
         renderStats(data);
         reportEl.classList.remove('hidden');

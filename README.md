@@ -44,18 +44,40 @@ strukturovaný report se skóre 1–10 a TL;DR.
 
 Z výčtu v zadání:
 
-| Vzor v zadání | Použito? | Kde                                                  |
-|---------------|----------|------------------------------------------------------|
-| Sequential    | ✅       | Specialisté → Supervisor je striktně sekvenční fáze  |
-| **Parallel**  | ✅       | `asyncio.gather()` na 3 specialistech současně       |
-| Loop          | ❌       | (nebylo potřeba pro tenhle use case)                  |
-| Conditional   | ❌       | (mohlo by se přidat — např. "skip security pokud diff je jen test")|
-| Collaboration | ➖       | Specialisté nespolupracují, ale jejich výstupy se slévají |
-| **Supervisor**| ✅       | Supervisor řídí, slévá, finalizuje report            |
-| Swarm         | ❌       | Pro 3 fixní role je swarm overkill                   |
+| Vzor v zadání   | Použito? | Kde                                                          |
+|-----------------|----------|--------------------------------------------------------------|
+| **Sequential**  | ✅       | Preflight → specialisté → supervisor je řetězec fází          |
+| **Parallel**    | ✅       | `asyncio.gather()` na N aktivních specialistech současně      |
+| **Loop**        | ✅       | Pokud supervisor dá skóre < 5/10, druhé kolo s refinementem  |
+| **Conditional** | ✅       | Preflighter rozhoduje, kteří specialisté poběží podle souboru |
+| Collaboration   | ➖       | Specialisté nespolupracují, jejich výstupy se slévají         |
+| **Supervisor**  | ✅       | Supervisor řídí, slévá, finalizuje report                     |
+| Swarm           | ❌       | Pro fixní role je swarm overkill                              |
 
-Hlavní vzor: **Supervisor + Parallel** — supervisor dispatchne specialisty,
-ti běží paralelně, supervisor slije výstupy.
+**Pět ze sedmi vzorů** — všechny čtyři workflow + Supervisor.
+
+Tok orchestrace:
+
+```
+user_code
+    ▼
+[Preflight]  ◄─ Conditional (Haiku, ~1s)
+    │  rozhodne, kteří specialisté
+    ▼
+┌─── iteration loop ──────────────────────┐  ◄─ Loop (max 2x)
+│  fan-out (asyncio.gather)  ◄─ Parallel  │
+│  ┌──[Sec]──┐ ┌──[Perf]──┐ ┌──[Style]──┐ │
+│  └─────────┘ └──────────┘ └───────────┘ │
+│        │                                 │
+│        ▼                                 │
+│   [Supervisor]            ◄─ Supervisor │
+│        │                                 │
+│        ▼                                 │
+│   skóre ≥ 5? ── ano ─► konec             │
+│        │ ne                              │
+│        └─► další iterace s REFINEMENT    │
+└─────────────────────────────────────────┘
+```
 
 ## Klíčové nápady, které stojí za zdůraznění
 
@@ -149,9 +171,12 @@ python3 -m reviewer examples/vulnerable_login.py --output reports/login.md
 python3 -m reviewer examples/vulnerable_login.py --json > review.json
 ```
 
-### Help
+### CLI flagy pro ladění chování
 
 ```bash
+python3 -m reviewer file.py --max-iterations 3        # Loop až 3 kola
+python3 -m reviewer file.py --score-threshold 7       # přísnější — refinement i při skóre 6/10
+python3 -m reviewer file.py --no-preflight            # vynechá Conditional, spustí všechny specialisty
 python3 -m reviewer --help
 ```
 
@@ -234,14 +259,19 @@ Pro hlubší pohled do toho, **proč** je to napsané tak, jak je, viz
 
 - **GitHub PR mode** (`--pr <url>`) — review celého PR přes `gh` CLI nebo
   GitHub MCP server.
-- **Loop pattern** — pokud supervisor dostane skóre < 5, znovu pošle
-  specialistům s instrukcí jít hlouběji.
-- **Conditional pattern** — preflighter, který podle typu souboru rozhodne,
-  zda vůbec spouštět security reviewera (např. u `*.md` ne).
 - **Caching** — pokud se kód nezměnil, vrátit poslední výsledek.
 - **Více jazyků** — teď je výstup v češtině; přepínač `--lang en/cs`.
+- **Specialisté jako pluginy** — místo hardcoded registry načítat z YAML
+  souborů, ať si uživatel může přidat vlastní (např. accessibility, i18n).
 
 ---
+
+## Bezpečnost a rozsah
+
+Tento repozitář je **přehled kódu** (showcase), ne produkční nástroj.
+Detaily v [`SECURITY.md`](SECURITY.md) — co repozitář **je**, co **není**,
+upozornění na úmyslně chybový `examples/vulnerable_login.py` a co zkontrolovat
+před spuštěním.
 
 ## Licence a autor
 

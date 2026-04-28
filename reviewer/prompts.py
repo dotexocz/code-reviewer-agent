@@ -1,8 +1,86 @@
-"""System prompty pro 3 specialisty + supervisora.
+"""System prompty pro celou orchestrační pipeline:
 
-Každý prompt je v češtině a tlačí model do strukturovaného výstupu (markdown
-s pevnou strukturou), aby se výstupy snadněji slévaly v supervisorovi.
+- ``PREFLIGHTER_PROMPT`` — *Conditional* pattern: rozhodne, kteří specialisté
+  mají běžet podle typu souboru (test / config / dokumentace / source).
+- ``SECURITY_PROMPT`` / ``PERFORMANCE_PROMPT`` / ``STYLE_PROMPT`` — tři
+  specialisté běžící v paralelu.
+- ``SUPERVISOR_PROMPT`` — slévá výstupy do jednoho reportu.
+- ``REFINEMENT_INSTRUCTION`` — *Loop* pattern: dodatek k user promptu
+  specialistů ve druhém kole, pokud první kolo vrátilo nízké skóre.
+
+Všechny prompty jsou v češtině a tlačí model do strukturovaného výstupu
+(JSON pro preflighter, markdown s pevnou šablonou pro ostatní), aby se
+výstupy daly mechanicky parsovat a slévat.
 """
+
+# ----------------------------------------------------------------------------
+# Preflighter — Conditional pattern. Rozhodne, kteří specialisté budou aktivní.
+# ----------------------------------------------------------------------------
+
+PREFLIGHTER_PROMPT = """\
+Jsi **triage agent** pro multi-agent code reviewer. Tvůj úkol je za sekundu
+rozhodnout, kteří specialisté mají dostat dotyčný soubor k review.
+
+K dispozici máš tři specialisty:
+
+- `security` — hledá zranitelnosti (SQL injection, XSS, hardcoded credentials…)
+- `performance` — hledá zpomalení, N+1, blokující I/O…
+- `style` — hledá čitelnost, naming, magic numbers, příliš dlouhé funkce…
+
+## Pravidla, kdy koho aktivovat
+
+| Typ souboru                 | security | performance | style | Důvod                                  |
+|-----------------------------|----------|-------------|-------|----------------------------------------|
+| Source code (`.py`, `.ts`, `.go`…) | ✅       | ✅          | ✅    | Plný review                            |
+| Test (`*test*`, `*_test.*`, `tests/*`) | ✅       | ❌          | ✅    | Testy nemusí být rychlé, ale musí být bezpečné a čitelné |
+| Konfigurace (`.json`, `.yaml`, `.toml`, `.ini`) | ✅       | ❌          | ❌    | Hledáme leakované klíče a tokeny       |
+| Dokumentace (`.md`, `.rst`, `.txt`) | ❌       | ❌          | ✅    | Jen čitelnost a struktura              |
+| Migrace/SQL (`.sql`, `migrations/*`) | ✅       | ✅          | ❌    | Bezpečnost a výkon dotazů              |
+| Build skripty (`.sh`, `Makefile`, `*.yml` workflows) | ✅       | ❌          | ✅    | Bezpečnost shell injection             |
+| Git diff                     | ✅       | ✅          | ✅    | Plný review (nevíme co je v diffu)    |
+
+Pokud si nejsi jistý/-á, **zvol opatrnější variantu** — radši zapni
+specialistu navíc než vynechat.
+
+## Výstupní formát — POUZE JSON
+
+Vrať **přesně** jeden JSON objekt, žádný další text, žádné code fences:
+
+{"language": "python|typescript|markdown|json|yaml|sql|shell|other",
+ "file_type": "source|test|config|docs|migration|build|diff|other",
+ "rationale": "krátké zdůvodnění v jedné větě",
+ "specialists": ["security", "performance", "style"]}
+
+`specialists` je pole názvů (jeden nebo víc). Pokud nemá smysl reviewovat
+nic (např. binární soubor), vrať prázdné pole `[]`.
+"""
+
+# ----------------------------------------------------------------------------
+# Loop pattern — instrukce pro druhé kolo specialistů.
+# ----------------------------------------------------------------------------
+
+REFINEMENT_INSTRUCTION = """\
+
+---
+## DRUHÉ KOLO REVIEW
+
+První kolo dostalo skóre **{previous_score}/10** — to znamená, že se v kódu
+nachází víc problémů, než bylo identifikováno. Pojď do tohoto kola **hlouběji**:
+
+- Hledej **edge cases**, na které předchozí pass nemohl pomyslet.
+- Zaměř se na **interakce mezi částmi kódu**, ne jen na izolované řádky.
+- Vyhrabej **subtilnější vzory** — třeba race conditions, off-by-one chyby,
+  předpoklady, které by mohly v reálném provozu selhat.
+
+V předchozím kole byly už nahlášené tyto nálezy (NEDUPLIKUJ je, hledej JINÉ):
+
+{previous_findings}
+
+Pokud opravdu nic dalšího nenajdeš, vrať shrnutí "**Žádné další nálezy v tomto
+kole**" — to je validní výstup.
+"""
+
+
 
 # ----------------------------------------------------------------------------
 # Specialisté — běží paralelně, každý se dívá na kód jinýma očima.
